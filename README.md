@@ -1,7 +1,7 @@
 
 # Top-Down Processing: Top-Down Network Combines Back-Propagation with Attention
 
-This repository is the official implementation of Top-Down Processing: Top-Down Network Combines Back-Propagation with Attention. 
+This repository is the official implementation of [Top-Down Processing: Top-Down Network Combines Back-Propagation with Attention](https://arxiv.org/abs/2306.02415). 
 
 ## The Method
 
