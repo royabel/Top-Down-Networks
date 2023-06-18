@@ -26,7 +26,7 @@ def butd_module_wrapper(cls):
             self.lateral = name2lateral_fn(kwargs.get('lateral_fn', 'galu'))
 
         def forward(self, x, non_linear=False, lateral=False, norm_module=None, **kwargs):
-            self.bu_neurons = x.detach().clone()
+            self.bu_neurons = x
 
             kwargs.update({'non_linear': non_linear, 'lateral': lateral})
 
@@ -44,7 +44,7 @@ def butd_module_wrapper(cls):
             return x
 
         def back_forward(self, x, non_linear=False, lateral=False, norm_module=None, **kwargs):
-            self.td_neurons = x.detach().clone()
+            self.td_neurons = x
 
             kwargs.update({'non_linear': non_linear, 'lateral': lateral})
 
