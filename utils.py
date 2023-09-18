@@ -4,6 +4,11 @@ import torch.nn.functional as F
 from torchvision import utils
 
 
+def galu(x, counter_x):
+    return x * (counter_x > 0)
+    # return x * (counter_x != 0)
+
+
 def update_in_shape_and_n_classes(params, data_loader):
     # auto adjust data set input size and number of classes
     data_sample = data_loader.dataset[0]
