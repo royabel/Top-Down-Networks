@@ -50,8 +50,8 @@ def loss_grads(outputs, labels, loss_name=None, n_classes=2):
         return (labels * (torch.sigmoid(outputs) - 1) + (1 - labels) * torch.sigmoid(outputs)) / labels.shape[-1]
     if loss_name == 'CrossEntropy':
         if len(labels.shape) > 1:
-            return F.softmax(outputs) - labels
-        return F.softmax(outputs) - F.one_hot(labels, n_classes)
+            return F.softmax(outputs, dim=1) - labels
+        return F.softmax(outputs, dim=1) - F.one_hot(labels, n_classes)
     if loss_name == 'MSE':
         # MSE gradients
         return (2 / n_classes) * (outputs - labels)

@@ -95,7 +95,10 @@ class BUTDLinear(nn.Linear):
         if shared_weights:
             self.register_parameter('back_weight', None)
         else:
-            self.back_weight = Parameter(torch.empty((in_features, out_features), **factory_kwargs))
+            if SymWeights:
+                self.back_weight = Parameter(self.weight.detach().clone().T)
+            else:
+                self.back_weight = Parameter(torch.empty((in_features, out_features), **factory_kwargs))
 
         if back_bias:
             self.back_bias = Parameter(torch.empty(in_features, **factory_kwargs))
@@ -108,13 +111,8 @@ class BUTDLinear(nn.Linear):
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
         # https://github.com/pytorch/pytorch/issues/57109
-        if not self.shared_weights:
-            if SymWeights:
-                with torch.no_grad():
-                    self.back_weight *= 0
-                    self.back_weight += self.weight.T
-            else:
-                init.kaiming_uniform_(self.back_weight, a=math.sqrt(5))
+        if not self.shared_weights and not SymWeights:
+            init.kaiming_uniform_(self.back_weight)
         if self.back_bias is not None:
             _, fan_out = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_out) if fan_out > 0 else 0
@@ -211,9 +209,13 @@ class BUTDConv2d(nn.Conv2d):
 
         if shared_weights:
             self.register_parameter('back_weight', None)
+            self.back_weight = None
         else:
-            self.back_weight = Parameter(torch.empty(
-                (self.out_channels, self.in_channels // self.groups, *self.kernel_size), **factory_kwargs))
+            if SymWeights:
+                self.back_weight = Parameter(self.weight.detach().clone())
+            else:
+                self.back_weight = Parameter(torch.empty(
+                    (self.out_channels, self.in_channels // self.groups, *self.kernel_size), **factory_kwargs))
 
         if back_bias:
             self.back_bias = Parameter(torch.empty(self.in_channels, **factory_kwargs))
@@ -226,13 +228,8 @@ class BUTDConv2d(nn.Conv2d):
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(k), 1/sqrt(k)), where k = weight.size(1) * prod(*kernel_size)
         # For more details see: https://github.com/pytorch/pytorch/issues/15314#issuecomment-477448573
-        if not self.shared_weights:
-            if SymWeights:
-                with torch.no_grad():
-                    self.back_weight *= 0
-                    self.back_weight += self.weight
-            else:
-                init.kaiming_uniform_(self.back_weight, a=math.sqrt(5))
+        if not self.shared_weights and not SymWeights:
+            init.kaiming_uniform_(self.back_weight)
         if self.back_bias is not None:
             _, fan_out = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_out)
@@ -258,7 +255,10 @@ class BUTDConv2d(nn.Conv2d):
             output_padding.append(
                 (total_padding[i] + input_dim - (kernel_size[i] * self.dilation[i] - self.dilation[i] + 1)) % self.stride[i])
         # weight_ = unpack_expanded_weight_or_tensor(self.weight)
-        out = F.conv_transpose2d(input, self.weight, None, self.stride, self.padding, tuple(output_padding), self.groups, self.dilation)
+        if self.back_weight is None:
+            out = F.conv_transpose2d(input, self.weight, None, self.stride, self.padding, tuple(output_padding), self.groups, self.dilation)
+        else:
+            out = F.conv_transpose2d(input, self.back_weight, None, self.stride, self.padding, tuple(output_padding), self.groups, self.dilation)
 
         if was_same_padding:
             for i in range(len(total_padding)):

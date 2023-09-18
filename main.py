@@ -637,7 +637,7 @@ if __name__ == '__main__':
     setup_logger(logging.getLogger(__name__), f"logs_{now.strftime('%Y-%m-%d_%H.%M.%S')}.txt")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file', type=str, default=None, help='Path to a config file')
+    parser.add_argument('--config_file', type=str, default='config.json', help='Path to a config file')
     args = parser.parse_args()
 
     if args.config_file is not None:

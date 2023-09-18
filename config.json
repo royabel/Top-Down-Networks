@@ -1,0 +1,57 @@
+{
+    "benchmark": "Multi MNIST",
+
+    "learning settings": {
+        "mtl": true,
+        "mtl comment": "mtl learning control whether to use multi-task learning or a single task learning",
+        "ch_learning": true,
+        "ch learning comment": "ch learning refers to Counter-Hebbian learning instead of back-propagation",
+        "task": "left/right",
+        "task available options": ["left/right", null],
+        "task_vector_size": 2,
+        "n_tasks": 2,
+        "network_name": "simple net",
+        "network available options": ["simple net", "resnet", "conv net"],
+        "shared_weights": false,
+        "shared weights comment": "whether the TD network use the BU weights or its own unique weights",
+        "non_linearity_fn": "relu",
+        "lateral_fn": "galu",
+        "non linear function comment": "not working yet, this parameter does not have any effect yet",
+        "bias": true,
+        "back_bias": false,
+        "back bias comment": "a bias for the TD network",
+        "metric_name": "Accuracy",
+        "metric available options": ["Accuracy", "Micro F1"],
+        "loss_name": "CrossEntropy",
+        "loss available options": ["MSE", "CrossEntropy", "BCE"],
+        "multi_decoders": false,
+        "resume_training": false,
+        "resume training comment": "true if keep training is desired. false for evaluating a pre-trained model without training."
+    },
+
+    "architecture parameters": {
+        "norm_layer": "no_norm",
+        "norm_layer available options": ["no_norm", null],
+        "task_embedding_size": 50,
+        "last_hidden_size": 50,
+        "conv_channels": [64, 64]
+    },
+
+    "data set parameters": {
+        "comment": "parameters for creating a data set, if data path is provided, the data set will be loaded",
+        "dataset_name": "multi_mnist",
+        "dataset available options": ["multi_mnist", "celeba"],
+        "data_path": "./Datasets",
+        "batch_size": 64
+    },
+
+    "optimizer parameters": {
+      "optimizer_name": "Adam",
+      "optimizer available options": ["SGD", "Adam"],
+      "lr": 0.0005,
+      "epochs": 100,
+      "lr_decay": 0.95
+    },
+
+    "saved_model_path": null
+}
