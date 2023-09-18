@@ -7,6 +7,7 @@ The paper propose a biologically-inspired learning method for instruction-models
 The key contributions of the paper are:
 * Propose a novel top-down mechanism that combines learning from error signals with top-down attention.
 * Extending earlier work, offering a new step toward a more biologically plausible learning model. 
+* Suggest a Counter-Hebbian mechanism for biological learning. 
 * Present a novel biologically-inspired MTL algorithm that dynamically creates unique task-dependent sub-networks within conventional networks. 
 
 ## The Method
@@ -20,13 +21,16 @@ The input for each component is indicated by a letter: $I$ marks the input signa
 This model enables: 
 
 ### Counter-Hebbian Learning
-A biologically motivated learning algorithm. The Counter-Hebb update rule in comparison with the classical Hebb rule. Focusing on a single upstream synapse (outlined by a circle), connecting a pre-synaptic neuron with a post-synaptic neuron. Both rules update the synapse based on the activity of both associated neurons. However, the Counter-Hebb update rule, presented on the right, relies on the counterpart downstream (marked in orange) counter neurons which is connected via lateral connections instead of a back firing from the upstream. 
+A biologically motivated learning mechanism. Similar to the classical Hebbian learning, the Counter-Hebb learning rule update the synapse based on the activity of the neurons connected to the synapse. However, the Counter-Hebb update rule, presented on the right, relies on the counterpart downstream (marked in orange) counter neurons which is connected via lateral connections instead of a back firing from the upstream neuron as in the classical Hebb rule (on the left).
+
 ![CH learning](/figs/update_rule.png)
 
 ### Multi-task Learning (MTL)
 The MTL algorithm offers dynamically learning task-dependent sub-networks for each task.
-The MTL algorithm comprises of two phases: a TD pass followed by a BU pass for prediction, and another TD pass for learning. The selected task provides input to the TD network via the task head $\Bar{H}_{\text{task}}$, and the activation propagates downward attention-guiding signals with ReLU non-linearity. By applying ReLU, the task selectively activates a subset of neurons (i.e. non-zero values), composing a sub-network within the full network. The BU network then processes an input image using a composition of ReLU and GaLU. The GaLU function (denoted with dashed arrows) gates the BU hidden layers $h_i$ by their corresponding counter TD hidden layers $\bar{h}_i$. As a result, the BU computation is performed only on the selected sub-network. Lastly, the prediction head $H_{\text{pred}}$ generates a prediction based on the top-level BU hidden layer $h_L$. For learning, the same TD network is then reused to propagate prediction error signals, starting from the prediction head $\Bar{H}_{\text{pred}}$. This computation is performed with GaLU exclusively (no ReLU), thereby permitting negative values. Finally, the 'Counter-Hebb' learning rule adjusts both networks' weights based on the activation values of their hidden layers $h_i$ and $\bar{h}_i$. Therefore, in contrast with standard models, the entire computation is carried out by neurons in the network, and no external computation is used for learning (e.g. Back-Propagation).
-Alternatively, the second phase can be replabed with standard BP under the constraints of sharing the BU and TD weights. This yields an equivalent learning phase.  
+The MTL algorithm comprises of two phases: a TD pass followed by a BU pass for prediction, and another TD pass for learning. The selected task provides input to the TD network, and the activation propagates downward attention-guiding signals with ReLU non-linearity. By applying ReLU, the task selectively activates a subset of neurons (i.e. non-zero values), composing a sub-network within the full network. The BU network then processes an input image using a composition of ReLU and GaLU. The GaLU function (denoted with dashed arrows) gates the BU hidden layers by their corresponding counter TD hidden layers. As a result, the BU computation is performed only on the selected sub-network. Lastly, the prediction head generates a prediction based on the top-level BU hidden layer. 
+For learning, the same TD network is then reused to propagate prediction error signals, starting from the prediction head. This computation is performed with GaLU exclusively (no ReLU), thereby permitting negative values. Finally, the 'Counter-Hebb' learning rule adjusts both networks' weights based on the activation values of their hidden layers. Therefore, in contrast with standard models, the entire computation is carried out by neurons in the network, and no external computation is used for learning (e.g. Back-Propagation).
+Alternatively, the learning phase can be replabed with standard BP under the constraints of sharing the BU and TD weights. This yields an equivalent learning phase.
+
 ![MTL](/figs/MTL_schematic.png)
 
 
@@ -51,7 +55,7 @@ python main.py --config_file multi_mnist_config.json
 
 ** Note that the Multi-MNIST dataset will be automatically downloaded to your directory
 
-To reproduce the Multi-MNIST experiments in the paper, run this command:
+To reproduce the Celeb-A experiments in the paper, run this command:
 
 ```train
 python main.py --config_file celeb_a_config.json 
@@ -85,8 +89,8 @@ Therefore, do not use `loss.backward` together with Counter-Hebbian learning.
 
 ## Running an Experiment
 
-To run an experiment, set hyper-parameters and other configurations in a `config.json` file, and run this command:  
+To run a custom experiment, set hyper-parameters and other configurations in a `config.json` file, and run this command:  
 
 ```run
-python main.py --config_file config.json
+python main.py
 ```
