@@ -255,7 +255,7 @@ class BUTDConv2d(nn.Conv2d):
             output_padding.append(
                 (total_padding[i] + input_dim - (kernel_size[i] * self.dilation[i] - self.dilation[i] + 1)) % self.stride[i])
         # weight_ = unpack_expanded_weight_or_tensor(self.weight)
-        if self.back_weight is None:
+        if self.shared_weights:
             out = F.conv_transpose2d(input, self.weight, None, self.stride, self.padding, tuple(output_padding), self.groups, self.dilation)
         else:
             out = F.conv_transpose2d(input, self.back_weight, None, self.stride, self.padding, tuple(output_padding), self.groups, self.dilation)
