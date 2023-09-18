@@ -11,25 +11,32 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 
-from network_models import ClassificationBUTDNet, TaskBUTDNet
+from butd_modules.butd_data_parallel import MyDataParallel
+from data.datasets import get_train_n_test_datasets
+from butd_modules.network_models import ClassificationBUTDNet, TaskBUTDNet
 from utils import *
 from names_utils import name2loss, name2metric, name2optim, name2network_module
 from mylogger import setup_logger
-
-from datasets import get_dataset, seed_worker
+from butd_modules.butd_core_networks import BUTDSimpleNet
 
 
 # Output Configurations
 WriteCSV = False
 SaveLastModel = False
-EvalIntermediate = False
-EvalInterFrequency = 5
 SaveIntermediateModels = False
-SavedModelsFrequency = 20
+SavedModelsFrequency = 5
+SaveForResuming = True
+SavedModelDirPath = ''
+EvalIntermediate = True
+EvalInterFrequency = 5
+Analyze = False
+AnalyzeFrequency = 3
+Repeat = 1
 
 Device = 'cuda'
+# Device = 'cpu'
 
-Settings = "Multi MNIST"
+WeightDecay = False
 
 
 class ModelCTL:
@@ -37,31 +44,62 @@ class ModelCTL:
     The main model object for training and evaluating a network.
     """
 
-    def __init__(self, net, **kwargs):
+    def __init__(self, net, benchmark='Multi MNIST', **kwargs):
+        self.logger = logging.getLogger(__name__)
+        self.writer_name = None
+
+        self.benchmark = benchmark
+
+        self.analysis_dict = {}
+        
+        # self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.device = Device
+        if torch.cuda.device_count() > 1 and self.device != 'cpu':
+            self.logger.info(f"{torch.cuda.device_count()} GPUs were detected and will be used")
+            # net = torch.nn.DataParallel(net)
+            net = MyDataParallel(net)
         self.net = net.to(self.device)
+
+        self.n_classes = net.n_classes
+        self.task = kwargs.get('task', None)
+        self.n_tasks = kwargs.get('n_tasks', None)
 
         self.loss_name = kwargs.get('loss_name', 'BCE')
         self.criterion = name2loss(self.loss_name)
         self.metric_name = kwargs.get('metric_name', 'Accuracy')
         self.metric = name2metric(self.metric_name)
 
-        self.shared_weights = net.shared_weights
-        self.task = None
-
         self.trainloader = None
         self.testloader = None
         self.dataset_name = None
 
-        self.n_classes = net.n_classes
+    def _analyze(self, epoch):
+        with torch.no_grad():
+            if self.benchmark == "Multi MNIST" and isinstance(self.net.core_net, BUTDSimpleNet):
+                if 'td_activations' not in self.analysis_dict:
+                    self.analysis_dict['td_activations'] = {}
 
-        self.logger = logging.getLogger(__name__)
-        self.writer_name = None
+                td_activations = {t: {} for t in range(self.n_tasks)}
 
-    def _analyze(self):
-        pass
+                # Sub-Networks Analysis
 
-    def train(self, dataloader=None, lr=0.001, epochs=10, ch_learning=False, **kwargs):
+                # Calculate the task-dependent sub-networks for all tasks
+                tasks = torch.eye(self.n_tasks, device=self.device)
+                self.net.back_forward(tasks, non_linear=True, lateral=False, task_head=True,
+                                      head_non_linear=True, head_lateral=False)
+
+                layer_i = 0
+                for td_layer in self.net.core_net.layers:
+                    if not hasattr(td_layer, 'td_neurons'):
+                        continue
+                    for t in range(self.n_tasks):
+                        td_activations[t][f"{layer_i} - {td_layer._get_name()}"] = td_layer.td_neurons[t].tolist()
+                    layer_i += 1
+
+                self.analysis_dict['td_activations'][epoch] = td_activations
+        return None
+
+    def train(self, dataloader=None, lr=0.001, epochs=10, ch_learning=False, train_all_tasks=False, **kwargs):
         """
         Train the model's network (self.net)
 
@@ -70,6 +108,7 @@ class ModelCTL:
             lr (float): the learning rate
             epochs (int): number of epochs to train the model
             ch_learning (bool): whether to use Counter Hebbian Learning or the standard optimizer.
+            mtl (bool): whether it is multi-task learning or a single task
         """
         if dataloader is not None:
             self.trainloader = dataloader
@@ -80,50 +119,83 @@ class ModelCTL:
         # learning algorithm parameters
         self.loss_name = kwargs.get('loss_name', self.loss_name)
         self.criterion = name2loss(self.loss_name)
-        optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr)
+        if WeightDecay:
+            optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr, weight_decay=0.05)
+        else:
+            optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr)
+
         if kwargs.get('lr_decay', False):
             if isinstance(kwargs['lr_decay'], bool):
                 decay_rate = 0.95
             else:
                 decay_rate = kwargs['lr_decay']
             lr_scheduler = optim.lr_scheduler.ExponentialLR(optimizer, decay_rate)
-        if ch_learning:
-            calc_loss_grads = partial(loss_grads, loss_name=self.loss_name, n_classes=self.n_classes)
+
+        calc_loss_grads = partial(loss_grads, loss_name=self.loss_name, n_classes=self.n_classes)
 
         mtl = kwargs.get('mtl', False)
-        if mtl:
-            if kwargs.get('task', None) is not None:
-                self.task = kwargs['task']
 
         if kwargs.get('writer_name', ''):
             self.writer_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S") + '_' +
                                 kwargs.get('writer_name', ''))
         else:
             self.writer_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S") +
-                                "_sw" * self.shared_weights +
+                                "_sw" * self.net.shared_weights +
                                 "_chl" * ch_learning +
-                                "_mtl" * mtl)
+                                "_mtl" * mtl +
+                                (self.net.multi_decoders * "_multi_d"))
 
         writer = SummaryWriter(f"runs/{self.writer_name}")
+        model_name = (
+                f"model_{self.dataset_name}_{self.writer_name}"
+        )
+
+        if kwargs.get('resume_training', False):
+            # loaded_model_path = os.path.join('Saved_Models', kwargs['saved_model_path'])
+            #
+            # checkpoint = torch.load(loaded_model_path)
+            checkpoint = self.load_model(kwargs['saved_model_path'], get_ckpt_data=True)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if kwargs.get('lr_decay', False):
+                lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+            last_epoch = checkpoint['epoch']
+            last_loss = checkpoint['loss']
+
+            self.logger.info(f"resuming training, starting from epoch {last_epoch} and loss {last_loss:.3f}")
+        else:
+            last_epoch = 0
 
         if EvalIntermediate:
-            self._write_metrics(epoch=0, writer=writer, **kwargs)
+            with torch.inference_mode():
+                self._write_metrics(epoch=last_epoch, writer=writer, **kwargs)
 
         self.net.train()
-        for epoch in range(epochs):  # loop over the dataset multiple times
+        if Analyze:
+            self._analyze(epoch=0)
 
-            self._analyze()
-
+        epoch_loss = torch.Tensor([0])
+        for epoch in range(last_epoch, epochs):  # loop over the dataset multiple times
             running_loss = 0.0
 
             for i, data in enumerate(self.trainloader):
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
-                inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=True)
+                if train_all_tasks:
+                    tasks_loss = []
+                    for task_i in range(self.n_tasks):
+                        tasks = (F.one_hot(torch.ones(data[0].shape[0]).long() * task_i, self.n_tasks) * 1.0).to(
+                            self.device)
+                        inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, tasks=tasks, train=True)
 
-                # loss = self.criterion(torch.sigmoid(outputs), labels)
-                loss = self.criterion(outputs, labels)
+                        tasks_loss.append(self.criterion(outputs, labels))
+
+                    loss = torch.mean(torch.stack(tasks_loss))
+                else:
+                    inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=True)
+
+                    loss = self.criterion(outputs, labels)
+
                 running_loss += loss.item()
 
                 # backward + update
@@ -136,6 +208,12 @@ class ModelCTL:
                     loss.backward()
                 optimizer.step()
 
+                if (i+1) % 100 == 0:
+                    self.logger.info(f"iteration {i + 1} running loss: {running_loss / (i+1):.3f}")
+
+            if Analyze and (epoch + 1) % AnalyzeFrequency == 0:
+                self._analyze(epoch=epoch + 1)
+
             if kwargs.get('lr_decay', False):
                 lr_scheduler.step()
 
@@ -144,7 +222,19 @@ class ModelCTL:
             writer.add_scalar(f"{self.loss_name} loss/running", epoch_loss, epoch + 1)
 
             if SaveIntermediateModels and epoch % SavedModelsFrequency == 0:
-                self.save_model(self.writer_name + f"epoch_{epoch}.pth")
+                if SaveForResuming:
+                    checkpoint_dict = {
+                        'epoch': epoch + 1,
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'loss': epoch_loss,
+                    }
+                    if kwargs.get('lr_decay', False):
+                        checkpoint_dict['lr_scheduler_state_dict'] = lr_scheduler.state_dict()
+
+                    self.save_model(f"{model_name}_epoch_{epoch+1}.tar", checkpoint_dict=checkpoint_dict)
+
+                else:
+                    self.save_model(f"{model_name}_epoch_{epoch+1}.pth")
 
             if EvalIntermediate and (epoch + 1) % EvalInterFrequency == 0:
                 with torch.inference_mode():
@@ -154,11 +244,25 @@ class ModelCTL:
         self.net.eval()
         self.logger.info('Finished Training')
 
+        # Evaluate the learned model
+        with torch.inference_mode():
+            self._write_metrics(epoch=epochs, writer=writer, **kwargs)
+
         if SaveLastModel:
-            self.save_model(f"model_{self.dataset_name}" + self.writer_name + '.pth')
+            self.save_model(f"{model_name}.pth")
+            if SaveForResuming:
+                checkpoint_dict = {
+                    'epoch': last_epoch + epochs,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': epoch_loss,
+                }
+                if kwargs.get('lr_decay', False):
+                    checkpoint_dict['lr_scheduler_state_dict'] = lr_scheduler.state_dict()
+
+                self.save_model(f"{model_name}tar", checkpoint_dict=checkpoint_dict)
         self.logger.info("model is saved")
 
-    def test(self, testloader=None, data_name="Test", **kwargs):
+    def test(self, testloader=None, data_name="Test", test_all_tasks=False, **kwargs):
         """
         evaluate the model's network
 
@@ -169,10 +273,10 @@ class ModelCTL:
         Returns:
             scores (dict[str, float]): the scores on the data. keys: loss, metric (for example f1)
         """
-        if testloader is not None:
-            self.testloader = testloader
+        if testloader is None and self.testloader is not None:
+            testloader = self.testloader
 
-        if self.testloader is None:
+        if testloader is None:
             raise ValueError("Needs to set a test data loader first")
 
         self.metric_name = kwargs.get('metric_name', self.metric_name)
@@ -186,91 +290,187 @@ class ModelCTL:
         y_gt = []
         y_preds = []
 
-        for data in self.testloader:
-            inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=False)
+        if test_all_tasks:
+            for data in testloader:
+                for task_i in range(self.n_tasks):
+                    tasks = (F.one_hot(torch.ones(data[0].shape[0]).long()*task_i, self.n_tasks) * 1.0).to(self.device)
+                    inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, tasks=tasks, train=False)
 
-            loss = self.criterion(outputs, labels)
-            running_loss += loss.item()
+                    loss = self.criterion(outputs, labels)
+                    running_loss += loss.item()
 
-            predictions = self.net.predict(outputs)
-            y_gt.append(labels.detach().cpu())
-            y_preds.append(predictions.detach().cpu())
+                    predictions = self.net.predict(outputs)
+                    y_gt.append(labels.detach().cpu())
+                    y_preds.append(predictions.detach().cpu())
+        else:
+            for data in testloader:
+                inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=False)
 
-        total_samples = len(self.testloader)
+                loss = self.criterion(outputs, labels)
+                running_loss += loss.item()
+
+                predictions = self.net.predict(outputs)
+                y_gt.append(labels.detach().cpu())
+                y_preds.append(predictions.detach().cpu())
+
+        if test_all_tasks:
+            total_samples = len(testloader) * self.n_tasks
+        else:
+            total_samples = len(testloader)
+
         final_loss = running_loss / total_samples
 
         if len(y_gt[0].shape) == 1:
             y_gt = torch.cat([x for x in y_gt])
+        elif len(y_gt[0].shape) == 2 and y_gt[0].shape[1] == 1:
+            y_gt = torch.cat([x[:, 0] for x in y_gt])
         else:
             y_gt = torch.argmax(torch.cat([x for x in y_gt]), axis=1)
 
-        metric_score = self.metric(y_gt.numpy(), torch.cat([x for x in y_preds]).numpy())
-        self.logger.info(f"{data_name} Loss: {final_loss:.3f}")
-        self.logger.info(f"{data_name} {kwargs.get('metric', self.metric_name)}: {metric_score:.3f}")
+        y_preds = torch.cat([x for x in y_preds])
+
+        metric_score = self.metric(y_gt.numpy(), y_preds.numpy())
+        self.logger.info(f"{data_name} Loss: {final_loss:.4f}")
+        self.logger.info(f"{data_name} {kwargs.get('metric', self.metric_name)}: {metric_score:.5f}")
 
         results_dict = {f"{self.loss_name} loss": final_loss, kwargs.get('metric', self.metric_name): metric_score}
 
         return results_dict
 
-    def _inner_op(self, batch_data, mtl=False, train=True):
+    def _inner_op(self, batch_data, mtl=False, tasks=None, train=True):
         inputs = batch_data[0].to(self.device)
-        if Settings == "Multi MNIST":
+        if self.benchmark == "Multi MNIST":
             labels = torch.stack([batch_data[1], batch_data[2]], -1).to(self.device)
         else:
             labels = batch_data[1].to(self.device)
 
         # forward
         if mtl:
-            tasks, labels = self._get_tasks_and_labels(all_labels=labels)
-            outputs = self.net.task_guidance_forward(inputs, task=tasks)
+            tasks, labels = self._get_tasks_and_labels(all_labels=labels, tasks=tasks)
+            outputs = self.net(inputs, task=tasks)
         else:
             tasks = None
             outputs = self.net(inputs)
 
-        if len(labels.shape) <= 1 and self.loss_name == 'BCE':
-            labels = F.one_hot(labels, self.n_classes).float()
+        if self.loss_name == 'BCE':
+            if len(labels.shape) <= 1 and (not self.net.multi_decoders):
+                if self.n_classes == 1:
+                    labels = labels.unsqueeze(-1)
+                else:
+                    labels = F.one_hot(labels, self.n_classes)
+            labels = labels.float()
 
         return inputs, outputs, labels, tasks
 
     def _get_tasks_and_labels(self, all_labels, tasks=None):
-        if self.task == "left/right":
+        if self.task == "left/right of":
+            # if task is not specified, generate a random task
+            if tasks is None:
+                # Chose randomly whether to the left or right to an object
+                tasks = (F.one_hot(torch.randint(0, 2, [all_labels.shape[0]]), 2) * 1.0).to(self.device)
+
+                # Given all labels that appear in the input ordered according to their position
+                # Extract all the indices of all labels that appear in the input
+                if len(all_labels.shape) > 2:
+                    # If all_labels is a one-hot vector, get the class indices
+                    all_labels = torch.argmax(all_labels, -1)
+                # Pick a random label.
+                # If the task is to predict the object to the left, don't pick the first,
+                # If it is to the right, don't pick the last
+                chosen_locations = (torch.randint(
+                    0, all_labels.shape[-1] - 1,
+                    [all_labels.shape[0]]).to(self.device) + tasks[:, 0].type(torch.int64)
+                                    ).unsqueeze(1)
+                chosen_labels = torch.gather(all_labels, 1, chosen_locations)[:, 0]
+
+                # Concatenate the chosen label to the task
+                tasks = torch.cat([tasks, F.one_hot(chosen_labels, self.n_classes)], -1)
+
+            # calculate the ground truth labels of that task
+            # Find the instance requested in the task
+            instance_location = (tasks[:, 2:].argmax(1).unsqueeze(1) == all_labels).nonzero()[:, 1]
+
+            # Find the target instance location - to the left/right of the instance mentioned in the task
+            target_instance_location = instance_location - tasks[:, 0] + tasks[:, 1]
+
+            # Get the label at that location
+            task_labels = torch.gather(all_labels, 1, target_instance_location.type(torch.int64).unsqueeze(1))[:, 0]
+        elif self.task == "left/right":
             # if task is not specified, generate a random task
             if tasks is None:
                 # Chose randomly whether to the left or right to an object
                 tasks = (F.one_hot(torch.randint(0, 2, [all_labels.shape[0]]), 2) * 1.0).to(self.device)
 
             task_labels = torch.gather(all_labels, 1, tasks.argmax(1).unsqueeze(1))[:, 0]
+        elif self.task == "binary attribute":
+            if tasks is None:
+                # Chose randomly whether to the left or right to an object
+                tasks = (F.one_hot(torch.randint(0, self.n_tasks, [all_labels.shape[0]]), self.n_tasks) * 1.0).to(self.device)
 
+            task_labels = torch.gather(all_labels, 1, tasks.argmax(1).unsqueeze(1))[:, 0]
         else:
             raise ValueError(f"The following task: {self.task} is not supported for multi-task learning")
 
         return tasks, task_labels
 
-    def save_model(self, model_name):
+    def save_model(self, model_name, checkpoint_dict=None):
         """
         save the model's parameters
 
         Args:
             model_name (str): the model will be saved at `./Saved_Models/model_name`
+            checkpoint_dict (dict): a dictionary contain relevant information for resuming training.
         """
-        Path('Saved_Models').mkdir(parents=True, exist_ok=True)
-        torch.save(self.net.state_dict(), os.path.join('Saved_Models', model_name))
+        if os.path.exists(SavedModelDirPath) and SavedModelDirPath != '':
+            dir_path = SavedModelDirPath
+        else:
+            Path('Saved_Models').mkdir(parents=True, exist_ok=True)
+            dir_path = 'Saved_Models'
 
-    def load_model(self, model_name):
+        if checkpoint_dict is None:
+            torch.save(self.net.state_dict(), os.path.join(dir_path, model_name))
+        else:
+            checkpoint_dict.update({'model_state_dict': self.net.state_dict()})
+
+            torch.save(checkpoint_dict, os.path.join(dir_path, model_name))
+
+    def load_model(self, model_name, get_ckpt_data=False):
         """
         load model's parameters from a file, and move them to the device
 
         Args:
             model_name (str): the model will be loaded from `./Saved_Models/model_name`
         """
-        self.net.load_state_dict(torch.load(os.path.join('Saved_Models', model_name)))
+        if os.path.exists(SavedModelDirPath) and SavedModelDirPath != '':
+            dir_path = SavedModelDirPath
+        else:
+            Path('Saved_Models').mkdir(parents=True, exist_ok=True)
+            dir_path = 'Saved_Models'
+
+        model_path = os.path.join(dir_path, model_name)
+
+        if not os.path.exists(model_path):
+            raise ValueError(f"try to load {model_name}, but it was not found")
+
+        loaded_data = torch.load(model_path)
+
+        if '.tar' in model_name:
+            self.net.load_state_dict(loaded_data['model_state_dict'])
+        else:
+            self.net.load_state_dict(loaded_data)
+
         self.net.to(self.device)
         self.net.eval()
 
+        if get_ckpt_data:
+            del loaded_data['model_state_dict']
+            return loaded_data
+
     def _write_metrics(self, epoch, writer, **kwargs):
         """
-        Write the metrics to tensorboard and optionally to a csv file
+        write the metrics for tensorboard
         """
+        self.logger.info(f"Evaluating epoch {epoch}:")
         res = self.test(self.trainloader, data_name='Train', **kwargs)
         for k, v in res.items():
             writer.add_scalar(k + '/train', v, epoch)
@@ -303,7 +503,7 @@ class ModelCTL:
         self.dataset_name = dataset_name
 
 
-def create_data_loaders(data_path=None, dataset_name=None, batch_size=32, **kwargs):
+def create_data_loaders(data_path=None, dataset_name=None, batch_size=64, **kwargs):
     """
     Create train and test data loaders.
 
@@ -326,18 +526,11 @@ def create_data_loaders(data_path=None, dataset_name=None, batch_size=32, **kwar
     """
     logger = logging.getLogger(__name__)
 
-    if data_path is None:
-        data_path = os.path.join('./Data_Sets', dataset_name)
+    train_dataset, test_dataset = get_train_n_test_datasets(dataset_name, data_path, **kwargs)
 
-    datasets_config = {}
-
-    if 'mnist' in dataset_name:
-        datasets_config['mnist'] = {
-            'path': data_path
-        }
-
-    train_dataloader, test_dataloader = get_dataset(dataset_name, batch_size, configs=datasets_config, train=True,
-                                                    generator=torch.Generator(), worker_init_fn=seed_worker)
+    # Create Data Loaders
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     logger.info("Data Loaders created")
     return train_dataloader, test_dataloader
@@ -355,11 +548,6 @@ def update_configs(conf_dict):
         else:
             new_conf_dict[k] = v
     del conf_dict
-
-    # automatically infer the data path
-    data_set_parameters = new_conf_dict["data set parameters"]
-    if data_set_parameters.get('data_path', None) is None:
-        data_set_parameters['data_path'] = f"./Data_Sets/{data_set_parameters['dataset_name']}"
 
     # automatically infer whether the model has shared weights
     if new_conf_dict.get('saved_model_path', None) is not None:
@@ -397,8 +585,7 @@ if WriteCSV:
     date_n_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
     csv_f = open(f"runs/{date_n_time_str}.csv", 'w')
     csv_writer = csv.writer(csv_f)
-    # TODO: write also headers for the metrics
-    csv_writer.writerow(['data set', 'model', 'epoch'])
+    csv_writer.writerow(['data set', 'model', 'epoch', 'train acc', 'train loss', 'test acc', 'test loss'])
 
 
 def main(configs):
@@ -412,26 +599,32 @@ def main(configs):
 
     plot_parameters(configs)
 
-    net_ = create_network(configs['learning settings'])
+    for _ in range(Repeat):
 
-    # Define model and data
-    model = ModelCTL(net=net_, **configs['evaluation parameters'])
-    model.set_dataloaders(train_dataloader_, test_dataloader_, configs['data set parameters']['dataset_name'])
+        net_ = create_network(configs['learning settings'])
 
-    # train a model or load a pre-trained
-    learning_args = {}
-    learning_args.update(configs['optimizer parameters'])
-    learning_args.update(configs['learning settings'])
-    learning_args.update(configs['evaluation parameters'])
+        # Define model and data
+        model = ModelCTL(net=net_, benchmark=configs.get('benchmark', 'Multi MNIST'), **configs['learning settings'])
+        model.set_dataloaders(train_dataloader_, test_dataloader_, configs['data set parameters']['dataset_name'])
 
-    if configs['saved_model_path'] is not None:
-        model.load_model(configs['saved_model_path'])
-    else:
-        model.train(**learning_args)
+        learning_args = {}
+        learning_args.update(configs['optimizer parameters'])
+        learning_args.update(configs['learning settings'])
+        learning_args['saved_model_path'] = configs['saved_model_path']
 
-    with torch.inference_mode():
-        model.test(train_dataloader_, 'train', **learning_args)
-        model.test(**learning_args)
+        # load a pre-trained
+        if learning_args['saved_model_path'] is not None and not learning_args['resume_training']:
+            model.load_model(learning_args['saved_model_path'])
+        else:
+            if learning_args['resume_training'] and learning_args['saved_model_path'] is None:
+                raise ValueError("'saved_model_pah' must be provided when resuming training")
+            if learning_args['resume_training'] and '.tar' not in learning_args['saved_model_path']:
+                raise ValueError(f"{learning_args['saved_model_pah']} is not a resumeable file, should be a '.tar' file")
+            model.train(**learning_args)
+
+        with torch.inference_mode():
+            # test_res = model.test(train_dataloader_, 'train', test_all_tasks=True, **learning_args)
+            model.test(test_all_tasks=True, **learning_args)
 
     if WriteCSV:
         csv_f.close()
@@ -444,15 +637,14 @@ if __name__ == '__main__':
     setup_logger(logging.getLogger(__name__), f"logs_{now.strftime('%Y-%m-%d_%H.%M.%S')}.txt")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file', type=str, default=None, help='Path to a config file')
+    parser.add_argument('--config_file', type=str, default='config.json', help='Path to a config file')
     args = parser.parse_args()
 
     if args.config_file is not None:
         with open(args.config_file) as config_params:
             configs_ = json.load(config_params)
     else:
-        with open("config.json") as config_params:
-            configs_ = json.load(config_params)
+        raise ValueError(f'The config file {args.config_file} does not exist')
 
     main(configs_)
 

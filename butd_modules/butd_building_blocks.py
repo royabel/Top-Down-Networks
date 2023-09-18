@@ -2,7 +2,7 @@ from typing import Optional, Callable
 
 from torchvision import models
 
-from custom_layers import *
+from butd_modules.butd_layers import *
 
 
 def butd_conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1, **kwargs) -> BUTDConv2d:
@@ -26,7 +26,7 @@ class BUTDBasicBlock(nn.Module):
         planes: int,
         stride: int = 1,
         downsample: Optional[nn.Module] = None,
-        downdample_norm_layer: Optional[nn.Module] = None,
+        downsample_norm_layer: Optional[nn.Module] = None,
         groups: int = 1,
         base_width: int = 64,
         dilation: int = 1,
@@ -52,17 +52,20 @@ class BUTDBasicBlock(nn.Module):
             self.bn1 = None
             self.bn2 = None
         else:
-            self.bn1 = norm_layer(planes)
+            if downsample_norm_layer is None:
+                self.bn1 = norm_layer(planes)
+            else:
+                self.bn1 = norm_layer(planes, back_num_features=downsample_norm_layer.back_num_features)
             self.bn2 = norm_layer(planes)
         self.downsample = downsample
-        self.downdample_norm_layer = downdample_norm_layer
+        self.downsample_norm_layer = downsample_norm_layer
         self.stride = stride
 
     def forward(self, x: Tensor, **kwargs) -> Tensor:
         identity = x
 
         if self.downsample is not None:
-            identity = self.downsample(x, norm_module=self.downdample_norm_layer, non_linear=False, lateral=False,
+            identity = self.downsample(x, norm_module=self.downsample_norm_layer, non_linear=False, lateral=False,
                                        bias_blocking=kwargs.get('bias_blocking', False))
 
         out = self.conv1(x, norm_module=self.bn1, **kwargs)
@@ -78,7 +81,7 @@ class BUTDBasicBlock(nn.Module):
         identity = x
 
         if self.downsample is not None:
-            identity = self.downsample.back_forward(x, norm_module=self.downdample_norm_layer, non_linear=False,
+            identity = self.downsample.back_forward(x, norm_module=self.downsample_norm_layer, non_linear=False,
                                                     lateral=False, bias_blocking=kwargs.get('bias_blocking', False))
 
         out = self.conv2.back_forward(x, norm_module=self.bn2, **kwargs)

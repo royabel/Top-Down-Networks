@@ -2,9 +2,12 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 
-from core_networks import BUTDSimpleNet, get_conv_net, butd_resnet18
+from butd_modules.butd_core_networks import BUTDSimpleNet, BUTDTinyResNet
+from butd_modules.butd_architectures import get_conv_net, butd_resnet18
+from utils import galu
 
 
 def name2loss(loss_name):
@@ -33,11 +36,25 @@ def name2optim(optimizer_name):
     raise ValueError(f"optimizer {optimizer_name} is not implemented")
 
 
+def name2non_linear_fn(non_linear_name):
+    if non_linear_name in ['relu', 'Relu']:
+        return F.relu
+    raise ValueError(f"non linear function {non_linear_name} is not implemented")
+
+
+def name2lateral_fn(lateral_name):
+    if lateral_name in ['galu', 'Galu']:
+        return galu
+    raise ValueError(f"lateral function {lateral_name} is not implemented")
+
+
 def name2network_module(network_name):
     if network_name == 'simple net':
         return BUTDSimpleNet
-    if network_name == 'resnet':
+    if network_name == 'resnet18':
         return butd_resnet18
+    if network_name == 'tiny resnet':
+        return BUTDTinyResNet
     if network_name == 'conv net':
         return get_conv_net
     raise ValueError(f"lateral function {network_name} is not implemented")

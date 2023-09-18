@@ -1,4 +1,4 @@
-#Adapted from: https://github.com/pytorch/vision/blob/master/torchvision/datasets/mnist.py
+#Taken from: https://github.com/yobibyte/unitary-scalarization-dmtl/blob/main/supervised_experiments/loaders/multi_mnist_loader.py
 
 from __future__ import print_function
 import torch.utils.data as data
@@ -187,8 +187,8 @@ def create_multimnist_labels(path, left_indices, right_indices):
         nom_length = get_int(data[4:8])
         parsed = np.frombuffer(data, dtype=np.uint8, offset=8)
         length = len(left_indices)
-        multi_labels_l = np.zeros(length, dtype=np.long)
-        multi_labels_r = np.zeros(length, dtype=np.long)
+        multi_labels_l = np.zeros(length, dtype=np.int32)
+        multi_labels_r = np.zeros(length, dtype=np.int32)
         for im_id in range(len(left_indices)):
             multi_labels_l[im_id] = parsed[left_indices[im_id]]
             multi_labels_r[im_id] = parsed[right_indices[im_id]]

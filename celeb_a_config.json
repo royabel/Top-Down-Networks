@@ -1,18 +1,18 @@
 {
-    "benchmark": "Multi MNIST",
+    "benchmark": "CelebA",
 
     "learning settings": {
         "mtl": true,
         "mtl comment": "mtl learning control whether to use multi-task learning or a single task learning",
-        "ch_learning": true,
+        "ch_learning": false,
         "ch learning comment": "ch learning refers to Counter-Hebbian learning instead of back-propagation",
-        "task": "left/right",
-        "task available options": ["left/right", null],
-        "task_vector_size": 2,
-        "n_tasks": 2,
-        "network_name": "simple net",
-        "network available options": ["simple net", "resnet", "conv net"],
-        "shared_weights": false,
+        "task": "binary attribute",
+        "task available options": ["left/right of", "left/right", null],
+        "task_vector_size": 40,
+        "n_tasks": 40,
+        "network_name": "resnet18",
+        "network available options": ["simple net", "tiny resnet", "conv net", "resnet18"],
+        "shared_weights": true,
         "shared weights comment": "whether the TD network use the BU weights or its own unique weights",
         "non_linearity_fn": "relu",
         "lateral_fn": "galu",
@@ -22,7 +22,7 @@
         "back bias comment": "a bias for the TD network",
         "metric_name": "Accuracy",
         "metric available options": ["Accuracy", "Micro F1"],
-        "loss_name": "CrossEntropy",
+        "loss_name": "BCE",
         "loss available options": ["MSE", "CrossEntropy", "BCE"],
         "multi_decoders": false,
         "resume_training": false,
@@ -30,16 +30,16 @@
     },
 
     "architecture parameters": {
-        "norm_layer": "no_norm",
+        "norm_layer": null,
         "norm_layer available options": ["no_norm", null],
-        "task_embedding_size": 50,
-        "last_hidden_size": 50,
-        "conv_channels": [64, 64]
+        "task_embedding_size": 200,
+        "last_hidden_size": 200,
+        "conv_channels": [32, 64]
     },
 
     "data set parameters": {
         "comment": "parameters for creating a data set, if data path is provided, the data set will be loaded",
-        "dataset_name": "multi_mnist",
+        "dataset_name": "celeba",
         "dataset available options": ["multi_mnist", "celeba"],
         "data_path": "./Datasets",
         "batch_size": 64
@@ -49,7 +49,7 @@
       "optimizer_name": "Adam",
       "optimizer available options": ["SGD", "Adam"],
       "lr": 0.0005,
-      "epochs": 100,
+      "epochs": 50,
       "lr_decay": 0.95
     },
 

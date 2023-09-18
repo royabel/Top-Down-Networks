@@ -1,23 +1,40 @@
 
-# Top-Down Processing: Top-Down Network Combines Back-Propagation with Attention
+# Top-Down Network Combines Back-Propagation with Attention
 
-This repository is the official implementation of [Top-Down Processing: Top-Down Network Combines Back-Propagation with Attention](https://arxiv.org/abs/2306.02415). 
+This repository is the implementation of the paper: ["Top-Down Network Combines Back-Propagation with Attention"](https://arxiv.org/abs/2306.02415).
+
+The paper propose a biologically-inspired learning method for instruction-models. It uses a bottom-up (BU) - top-down (TD) model, in which a single TD network is used for both learning and guiding attention.
+The key contributions of the paper are:
+* Propose a novel top-down mechanism that combines learning from error signals with top-down attention.
+* Extending earlier work, offering a new step toward a more biologically plausible learning model. 
+* Suggest a Counter-Hebbian mechanism for biological learning. 
+* Present a novel biologically-inspired MTL algorithm that dynamically creates unique task-dependent sub-networks within conventional networks. 
 
 ## The Method
 
-We use a bottom-up (BU) - top-down (TD) model, in which a single TD network is used for both learning and guiding TD attention.
+![BU-TD Approach](/figs/top_down_processing.png)
+
+The proposed BU-TD approach consists of BU (blue $\uparrow$) and TD (orange $\downarrow$) networks with bi-directional connections. These networks can operate recurrently. A single TD network is used for both propagating down error signals and TD attention, while the BU network handles the processing of input signals. On the right, this concept is illustrated within a multi-task learning setting. 
+The input for each component is indicated by a letter: $I$ marks the input signal (e.g. images in the case of vision), $E$ marks error signals (e.g. loss gradients), and $A$ marks attention signals, e.g. selected object, location, or task. 
+
 
 This model enables: 
-*   Multi-task learning (MTL), by dynamically learning task-dependent sub-networks for each task. 
-*   Counter-Hebbian learning, a biologically motivated learning algorithm.
 
-![Top-Down processing](/figs/td_processing.png)
+### Counter-Hebbian Learning
+A biologically motivated learning mechanism. Similar to the classical Hebbian learning, the Counter-Hebb learning rule update the synapse based on the activity of the neurons connected to the synapse. However, the Counter-Hebb update rule, presented on the right, relies on the counterpart downstream (marked in orange) counter neurons which is connected via lateral connections instead of a back firing from the upstream neuron as in the classical Hebb rule (on the left).
 
-The different approaches of combining BU with TD processing in deep learning models. Solid arrows represent computations that are part of the model, dashed arrows represent an external backward computation that is not part of the model. (a) illustrates standard bottom-up architectures followed by an external back-propagation. (b) illustrates current methods for using TD attention. A TD stream creates an attention signal that influences the subsequent BU processing, followed by external backward computation for updating both BU and TD weights. Other architectures that share the same concept have been proposed, for instance, a popular scheme termed ‘U-net’ is similar to (b), but applies a BU stage first, followed by TD. (c) Our BU-TD model consists of BU and TD networks with bi-directional connections. A single TD network is used for both back-propagating errors and TD attention. 
+![CH learning](/figs/update_rule.png)
 
-For example, in multi-task learning (MTL) on Multi-MNIST, the selected task (left/right) provides input to the TD network which propagates downwards. This TD pass guides the next BU pass by selecting a sub-network within the full network. The BU network then receives an input image and generates a prediction by performing only on the partial sub-network. The same TD network then can be used to propagate error signals for updating the weights without any additional backward computation.
+### Multi-task Learning (MTL)
+The MTL algorithm offers dynamically learning task-dependent sub-networks for each task.
+The MTL algorithm comprises of two phases: a TD pass followed by a BU pass for prediction, and another TD pass for learning. The selected task provides input to the TD network, and the activation propagates downward attention-guiding signals with ReLU non-linearity. By applying ReLU, the task selectively activates a subset of neurons (i.e. non-zero values), composing a sub-network within the full network. The BU network then processes an input image using a composition of ReLU and GaLU. The GaLU function (denoted with dashed arrows) gates the BU hidden layers by their corresponding counter TD hidden layers. As a result, the BU computation is performed only on the selected sub-network. Lastly, the prediction head generates a prediction based on the top-level BU hidden layer. 
+For learning, the same TD network is then reused to propagate prediction error signals, starting from the prediction head. This computation is performed with GaLU exclusively (no ReLU), thereby permitting negative values. Finally, the 'Counter-Hebb' learning rule adjusts both networks' weights based on the activation values of their hidden layers. Therefore, in contrast with standard models, the entire computation is carried out by neurons in the network, and no external computation is used for learning (e.g. Back-Propagation).
+Alternatively, the learning phase can be replabed with standard BP under the constraints of sharing the BU and TD weights. This yields an equivalent learning phase.
 
-![Top-Down processing](/figs/MTL.png)
+![MTL](/figs/MTL_schematic.png)
+
+
+See the paper for more details.
 
 
 ## Requirements
@@ -30,30 +47,38 @@ pip install -r requirements.txt
 
 ## Multi-Task Learning 
 
-To reproduce the experiment in the paper, run this command:
+To reproduce the Multi-MNIST experiments in the paper, run this command:
 
 ```train
 python main.py --config_file multi_mnist_config.json 
 ```
 
-Note that the Multi-MNIST dataset will be automatically downloaded to your directory
+** Note that the Multi-MNIST dataset will be automatically downloaded to your directory
 
-## BU-TD layers
+To reproduce the Celeb-A experiments in the paper, run this command:
+
+```train
+python main.py --config_file celeb_a_config.json 
+```
+
+** Note that the dataset must be downloaded in advance either from [here](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) or from Pytorch torchvision datasets
+
+## BU-TD Modules
 
 BU-TD layers wrap standard Pytorch layers to fit a BU-TD model. 
 *   Implements a `back_forward` method. The `back_forward` method serves as a forward pass for the TD network, while the `forward` method is for the BU.
 *   It allows lateral connectivity, each network can gate the other. 
 
-Many layers already implemented in `custom_layer.py`, you can add your own layers. 
+Some layers already implemented in `butd_layer.py` (e.g. Linear, Conv2d), you can add your own layers. 
 
-ResNet blocks are implemented in `butd_network_building_blocks.py`.  
+ResNet blocks are implemented in `butd_building_blocks.py`.  
 
 ## Creating a BU-TD model
 
 *   Define your own BU-TD model using the custom layers.
     *   Use BU-TD layers similar to the standard PyTorch layers usage. 
     *   The BU-TD model class must include `back_forward` method (and optionally `counter_hebbian_update_value` method to support Counter-Hebbian learning)
-    *   ResNet and Convolutional networks examples can be found in `core_networks.py`.
+    *   ResNet and Convolutional networks examples can be found in `butd_core_networks.py`.
     
 ## Counter-Hebbian Learning
 
@@ -64,8 +89,8 @@ Therefore, do not use `loss.backward` together with Counter-Hebbian learning.
 
 ## Running an Experiment
 
-To run an experiment, set hyper-parameters and other configurations in the `config.json` file, and run this command:  
+To run a custom experiment, set hyper-parameters and other configurations in a `config.json` file, and run this command:  
 
 ```run
-python main.py 
+python main.py
 ```
