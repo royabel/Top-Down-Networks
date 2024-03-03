@@ -6,7 +6,10 @@ from functools import partial
 from pathlib import Path
 import datetime
 import csv
+import matplotlib
+matplotlib.use('TkAgg')
 
+import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
@@ -181,20 +184,22 @@ class ModelCTL:
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
-                if train_all_tasks:
-                    tasks_loss = []
-                    for task_i in range(self.n_tasks):
-                        tasks = (F.one_hot(torch.ones(data[0].shape[0]).long() * task_i, self.n_tasks) * 1.0).to(
-                            self.device)
-                        inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, tasks=tasks, train=True)
+                with torch.set_grad_enabled(not ch_learning):
+                    # when learning via ch_learning there is no standard backward
+                    if train_all_tasks:
+                        tasks_loss = []
+                        for task_i in range(self.n_tasks):
+                            tasks = (F.one_hot(torch.ones(data[0].shape[0]).long() * task_i, self.n_tasks) * 1.0).to(
+                                self.device)
+                            inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, tasks=tasks, train=True)
 
-                        tasks_loss.append(self.criterion(outputs, labels))
+                            tasks_loss.append(self.criterion(outputs, labels))
 
-                    loss = torch.mean(torch.stack(tasks_loss))
-                else:
-                    inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=True)
+                        loss = torch.mean(torch.stack(tasks_loss))
+                    else:
+                        inputs, outputs, labels, tasks = self._inner_op(data, mtl=mtl, train=True)
 
-                    loss = self.criterion(outputs, labels)
+                        loss = self.criterion(outputs, labels)
 
                 running_loss += loss.item()
 

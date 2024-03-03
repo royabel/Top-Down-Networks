@@ -9,6 +9,14 @@ def galu(x, counter_x):
     # return x * (counter_x != 0)
 
 
+def mult_lateral(x, counter_x):
+    return x * counter_x
+
+
+def add_lateral(x, counter_x):
+    return x + counter_x
+
+
 def update_in_shape_and_n_classes(params, data_loader):
     # auto adjust data set input size and number of classes
     data_sample = data_loader.dataset[0]

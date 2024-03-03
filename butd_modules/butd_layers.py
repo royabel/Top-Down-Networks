@@ -16,6 +16,7 @@ from torch.nn.utils._expanded_weights.conv_utils import conv_backward, int_paddi
 
 SymWeights = False
 AddNoise = False
+NoiseStd = 0.1
 
 
 def butd_module_wrapper(cls):
@@ -26,11 +27,17 @@ def butd_module_wrapper(cls):
             self.bu_neurons = None
             self.td_neurons = None
 
-            self.non_linear = kwargs.get('non_linear', F.relu)
-            self.lateral = kwargs.get('lateral', galu)
+            self.default_non_linear = F.relu
+            self.default_lateral = galu
 
         def forward(self, x, non_linear=False, lateral=False, norm_module=None, **kwargs):
-            # self.bu_neurons = x.detach().clone()
+            """
+            Args:
+                non_linear (bool, function): if bool indicates whether to use the default non_linearity or not.
+                    can be a specific non-linear function to use.
+                lateral (bool, function): if bool indicates whether to use the default lateral function or not.
+                    can be a specific lateral function to use.
+            """
             self.bu_neurons = x
 
             kwargs.update({'non_linear': non_linear, 'lateral': lateral})
@@ -41,15 +48,27 @@ def butd_module_wrapper(cls):
                 x = norm_module(x)
 
             if non_linear:
-                x = self.non_linear(x)
+                if isinstance(non_linear, bool):
+                    x = self.default_non_linear(x)
+                else:
+                    x = non_linear(x)
 
             if lateral:
-                x = self.lateral(x, self.td_neurons)
+                if isinstance(lateral, bool):
+                    x = self.default_lateral(x, self.td_neurons)
+                else:
+                    x = lateral(x, self.td_neurons)
 
             return x
 
         def back_forward(self, x, non_linear=False, lateral=False, norm_module=None, **kwargs):
-            # self.td_neurons = x.detach().clone()
+            """
+            Args:
+                non_linear (bool, function): if bool indicates whether to use the default non_linearity or not.
+                    can be a specific non-linear function to use.
+                lateral (bool, function): if bool indicates whether to use the default lateral function or not.
+                    can be a specific lateral function to use.
+            """
             self.td_neurons = x
 
             kwargs.update({'non_linear': non_linear, 'lateral': lateral})
@@ -60,10 +79,16 @@ def butd_module_wrapper(cls):
                 x = norm_module.back_forward(x)
 
             if non_linear:
-                x = self.non_linear(x)
+                if isinstance(non_linear, bool):
+                    x = self.default_non_linear(x)
+                else:
+                    x = non_linear(x)
 
             if lateral:
-                x = self.lateral(x, self.bu_neurons)
+                if isinstance(lateral, bool):
+                    x = self.default_lateral(x, self.bu_neurons)
+                else:
+                    x = lateral(x, self.bu_neurons)
 
             return x
 
@@ -132,12 +157,12 @@ class BUTDLinear(nn.Linear):
 
         if self.weight.grad is None:
             if AddNoise:
-                self.weight.grad = update_val * torch.normal(torch.Tensor([1]), torch.Tensor([0.01])).to(update_val.device)
+                self.weight.grad = update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(update_val.device)
             else:
                 self.weight.grad = update_val
         else:
             if AddNoise:
-                self.weight.grad += update_val * torch.normal(torch.Tensor([1]), torch.Tensor([0.01])).to(update_val.device)
+                self.weight.grad += update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(update_val.device)
             else:
                 self.weight.grad += update_val
 
@@ -160,12 +185,12 @@ class BUTDLinear(nn.Linear):
             # else:
             if self.back_weight.grad is None:
                 if AddNoise:
-                    self.back_weight.grad = update_val.T * torch.normal(torch.Tensor([1]), torch.Tensor([0.01])).to(update_val.device)
+                    self.back_weight.grad = update_val.T * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(update_val.device)
                 else:
                     self.back_weight.grad = update_val.T
             else:
                 if AddNoise:
-                    self.back_weight.grad += update_val.T * torch.normal(torch.Tensor([1]), torch.Tensor([0.01])).to(update_val.device)
+                    self.back_weight.grad += update_val.T * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(update_val.device)
                 else:
                     self.back_weight.grad += update_val.T
 
