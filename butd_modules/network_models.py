@@ -8,6 +8,8 @@ class ClassificationBUTDNet(nn.Module):
         self.n_classes = n_classes
         self.core_net = core_network
 
+        self.multi_decoders = False
+
         self.head_layer = BUTDLinear(in_features=self.core_net.out_shape, out_features=n_classes,
                                      shared_weights=shared_weights, **kwargs)
 

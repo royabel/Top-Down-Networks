@@ -17,6 +17,7 @@ from torch.nn.utils._expanded_weights.conv_utils import conv_backward, int_paddi
 SymWeights = False
 AddNoise = False
 NoiseStd = 0.1
+WeightInitFactor = False
 
 
 def butd_module_wrapper(cls):
@@ -131,6 +132,12 @@ class BUTDLinear(nn.Linear):
             self.register_parameter('back_bias', None)
 
         self.reset_back_parameters()
+
+        if WeightInitFactor:
+            with torch.no_grad():
+                self.weight *= WeightInitFactor
+                if not self.shared_weights:
+                    self.back_weight *= WeightInitFactor
 
     def reset_back_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
@@ -249,6 +256,12 @@ class BUTDConv2d(nn.Conv2d):
 
         self.reset_back_parameters()
 
+        if WeightInitFactor:
+            with torch.no_grad():
+                self.weight *= WeightInitFactor
+                if not self.shared_weights:
+                    self.back_weight *= WeightInitFactor
+
     def reset_back_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(k), 1/sqrt(k)), where k = weight.size(1) * prod(*kernel_size)
@@ -334,9 +347,17 @@ class BUTDConv2d(nn.Conv2d):
         ) / len(self.bu_neurons)
 
         if self.weight.grad is None:
-            self.weight.grad = update_val
+            if AddNoise:
+                self.weight.grad = update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(
+                    update_val.device)
+            else:
+                self.weight.grad = update_val
         else:
-            self.weight.grad += update_val
+            if AddNoise:
+                self.weight.grad += update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(
+                    update_val.device)
+            else:
+                self.weight.grad += update_val
 
         if self.bias is not None and update_forward_bias:
             if self.bias.grad is None:
@@ -354,11 +375,17 @@ class BUTDConv2d(nn.Conv2d):
             # The TD weights gets the same update as the BU weights (up to a transpose)
             # if len(update_val) == len(self.back_weight):
             if self.back_weight.grad is None:
-                self.back_weight.grad = update_val
+                if AddNoise:
+                    self.back_weight.grad = update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(
+                        update_val.device)
+                else:
+                    self.back_weight.grad = update_val
             else:
-                self.back_weight.grad += update_val
-            # else:
-            #     self.back_weight.grad += update_val.T
+                if AddNoise:
+                    self.back_weight.grad += update_val * torch.normal(torch.Tensor([1]), torch.Tensor([NoiseStd])).to(
+                        update_val.device)
+                else:
+                    self.back_weight.grad += update_val
 
     def get_out_spatial_shape(self, in_shape):
         out_shape = []

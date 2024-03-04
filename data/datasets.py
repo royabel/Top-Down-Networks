@@ -5,7 +5,27 @@ import data.multi_mnist_loader as multi_mnist_loader
 
 
 def get_train_n_test_datasets(dataset_name, data_path='./Datasets', **kwargs):
-    if dataset_name == 'celeba':
+    if dataset_name == 'mnist':
+        train_dataset = datasets.MNIST(data_path, train=True, download=True,
+                                       transform=global_transformer())
+        test_dataset = datasets.MNIST(data_path, train=False,
+                                      transform=global_transformer())
+    elif dataset_name == 'fashion_mnist':
+        train_dataset = datasets.FashionMNIST(data_path, train=True, download=True,
+                                              transform=global_transformer())
+        test_dataset = datasets.FashionMNIST(data_path, train=False,
+                                             transform=global_transformer())
+    elif dataset_name == 'cifar':
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))],
+            # transforms.Lambda(lambda x: x.to(Device))
+        )
+        train_dataset = datasets.CIFAR10(data_path, train=True, download=True,
+                                         transform=transform)
+        test_dataset = datasets.CIFAR10(data_path, train=False,
+                                        transform=transform)
+    elif dataset_name == 'celeba':
         transform = transforms.Compose(
             [transforms.ToTensor(),
              transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
