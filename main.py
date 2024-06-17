@@ -25,19 +25,23 @@ from butd_modules.butd_core_networks import BUTDSimpleNet
 
 # Output Configurations
 WriteCSV = False
+CVSFileName = ''
 SaveLastModel = False
 SaveIntermediateModels = False
-SavedModelsFrequency = 5
+SavedModelsFrequency = 2
 SaveForResuming = True
 SavedModelDirPath = ''
 EvalIntermediate = True
-EvalInterFrequency = 5
+EvalInterFrequency = 2
 Analyze = False
-AnalyzeFrequency = 3
-Repeat = 1
+AnalyzeFrequency = 2
+Repeat = 10
 
 Device = 'cuda'
 # Device = 'cpu'
+
+DefaultTestAllTasks = True
+DefaultTrainAllTasks = False
 
 WeightDecay = False
 
@@ -76,6 +80,8 @@ class ModelCTL:
         self.testloader = None
         self.dataset_name = None
 
+        self.csv_writer = kwargs.get('csv_writer', None)
+
     def _analyze(self, epoch):
         with torch.no_grad():
             if self.benchmark == "Multi MNIST" and isinstance(self.net.core_net, BUTDSimpleNet):
@@ -102,7 +108,7 @@ class ModelCTL:
                 self.analysis_dict['td_activations'][epoch] = td_activations
         return None
 
-    def train(self, dataloader=None, lr=0.001, epochs=10, ch_learning=False, train_all_tasks=False, **kwargs):
+    def train(self, dataloader=None, lr=0.001, epochs=10, ch_learning=False, train_all_tasks=DefaultTrainAllTasks, **kwargs):
         """
         Train the model's network (self.net)
 
@@ -112,6 +118,8 @@ class ModelCTL:
             epochs (int): number of epochs to train the model
             ch_learning (bool): whether to use Counter Hebbian Learning or the standard optimizer.
             mtl (bool): whether it is multi-task learning or a single task
+            train_all_tasks (bool): in case of multi-task learning, chose whether to sample one random task for each
+                instance or to train all the possible tasks.
         """
         if dataloader is not None:
             self.trainloader = dataloader
@@ -123,7 +131,8 @@ class ModelCTL:
         self.loss_name = kwargs.get('loss_name', self.loss_name)
         self.criterion = name2loss(self.loss_name)
         if WeightDecay:
-            optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr, weight_decay=0.05)
+            optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr,
+                                                                        weight_decay=kwargs.get('wd_val', WeightDecayValue))
         else:
             optimizer = name2optim(kwargs.get('optimizer_name', 'SGD'))(self.net.parameters(), lr=lr)
 
@@ -208,6 +217,12 @@ class ModelCTL:
                     # calculate the gradients of the loss with respect to the network outputs
                     # Then propagate it using the TD network and apply the Counter Hebbian learning rule
                     d_l_d_outputs = calc_loss_grads(outputs, labels)
+
+                    if kwargs.get('multi_decoders', False):
+                        new_dl_do = torch.zeros([d_l_d_outputs.shape[0], 2, d_l_d_outputs.shape[1]], device=d_l_d_outputs.device)
+                        new_dl_do[tasks == 1] = d_l_d_outputs
+                        d_l_d_outputs = new_dl_do.reshape(d_l_d_outputs.shape[0], -1)
+
                     self.net.counter_hebbian_back_prop(d_l_d_outputs)
                 else:
                     loss.backward()
@@ -241,7 +256,7 @@ class ModelCTL:
                 else:
                     self.save_model(f"{model_name}_epoch_{epoch+1}.pth")
 
-            if EvalIntermediate and (epoch + 1) % EvalInterFrequency == 0:
+            if EvalIntermediate and (epoch + 1) % EvalInterFrequency == 0 and epoch + 1 != epochs:
                 with torch.inference_mode():
                     self._write_metrics(epoch + 1, writer=writer, **kwargs)
                 self.net.train()
@@ -267,7 +282,7 @@ class ModelCTL:
                 self.save_model(f"{model_name}tar", checkpoint_dict=checkpoint_dict)
         self.logger.info("model is saved")
 
-    def test(self, testloader=None, data_name="Test", test_all_tasks=False, **kwargs):
+    def test(self, testloader=None, data_name="Test", test_all_tasks=DefaultTestAllTasks, **kwargs):
         """
         evaluate the model's network
 
@@ -357,7 +372,7 @@ class ModelCTL:
             tasks = None
             outputs = self.net(inputs)
 
-        if self.loss_name == 'BCE':
+        if self.loss_name in ['BCE', 'MSE']:
             if len(labels.shape) <= 1 and (not self.net.multi_decoders):
                 if self.n_classes == 1:
                     labels = labels.unsqueeze(-1)
@@ -492,7 +507,7 @@ class ModelCTL:
                 csv_out.extend([res[k] for k in sorted(res.keys())])
 
         if WriteCSV:
-            csv_writer.writerow(csv_out)
+            self.csv_writer.writerow(csv_out)
 
     def set_dataloaders(self, train_loader, test_loader, dataset_name):
         """
@@ -535,7 +550,7 @@ def create_data_loaders(data_path=None, dataset_name=None, batch_size=64, **kwar
 
     # Create Data Loaders
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     logger.info("Data Loaders created")
     return train_dataloader, test_dataloader
@@ -586,13 +601,6 @@ def create_network(net_params):
     return net
 
 
-if WriteCSV:
-    date_n_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
-    csv_f = open(f"runs/{date_n_time_str}.csv", 'w')
-    csv_writer = csv.writer(csv_f)
-    csv_writer.writerow(['data set', 'model', 'epoch', 'train acc', 'train loss', 'test acc', 'test loss'])
-
-
 def main(configs):
     configs = update_configs(configs)
     configs['learning settings'].update(configs['architecture parameters'])
@@ -604,12 +612,22 @@ def main(configs):
 
     plot_parameters(configs)
 
+    if WriteCSV:
+        Path("runs").mkdir(parents=False, exist_ok=True)
+        date_n_time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
+        csv_f = open(f"runs/{date_n_time_str}_{CVSFileName}.csv", 'w')
+        csv_writer = csv.writer(csv_f)
+        csv_writer.writerow(['data set', 'model', 'epoch', 'train acc', 'train loss', 'test acc', 'test loss'])
+    else:
+        csv_writer = None
+
     for _ in range(Repeat):
 
         net_ = create_network(configs['learning settings'])
 
         # Define model and data
-        model = ModelCTL(net=net_, benchmark=configs.get('benchmark', 'Multi MNIST'), **configs['learning settings'])
+        model = ModelCTL(net=net_, benchmark=configs.get('benchmark', 'Multi MNIST'), **configs['learning settings'],
+                         csv_writer=csv_writer)
         model.set_dataloaders(train_dataloader_, test_dataloader_, configs['data set parameters']['dataset_name'])
 
         learning_args = {}
@@ -617,8 +635,8 @@ def main(configs):
         learning_args.update(configs['learning settings'])
         learning_args['saved_model_path'] = configs['saved_model_path']
 
-        # load a pre-trained
         if learning_args['saved_model_path'] is not None and not learning_args['resume_training']:
+            # load a pre-trained
             model.load_model(learning_args['saved_model_path'])
         else:
             if learning_args['resume_training'] and learning_args['saved_model_path'] is None:

@@ -118,9 +118,9 @@ class TaskBUTDNet(ClassificationBUTDNet):
         # 1) a backward pass with task as input to select the task-dependent sub-network
         # 2) a forward pass made on the selected sub-network
 
-        # with torch.no_grad():
-        self.back_forward(task, non_linear=True, lateral=False, task_head=True,
-                          head_non_linear=True, head_lateral=False)
+        with torch.no_grad():
+            self.back_forward(task, non_linear=True, lateral=False, task_head=True,
+                              head_non_linear=True, head_lateral=False)
 
         x = self._forward_impl(x, non_linear=True, lateral=True, task_head=False, **kwargs)
 

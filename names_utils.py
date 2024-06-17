@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 
-from butd_modules.butd_core_networks import BUTDSimpleNet, BUTDTinyResNet
+from butd_modules.butd_core_networks import BUTDSimpleNet, BUTDTinyResNet, BUTDFCNet
 from butd_modules.butd_architectures import get_conv_net, butd_resnet18
 from utils import galu
 
@@ -57,6 +57,8 @@ def name2network_module(network_name):
         return BUTDTinyResNet
     if network_name == 'conv net':
         return get_conv_net
+    if network_name == 'fc net':
+        return BUTDFCNet
     raise ValueError(f"lateral function {network_name} is not implemented")
 
 

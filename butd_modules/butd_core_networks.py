@@ -17,11 +17,12 @@ class BUTDSimpleNet(nn.Module):
         out_shape = kwargs.get('last_hidden_size', 50)
 
         self._conv1 = BUTDConv2d(in_shape[0], conv1_channels, kernel_size=5, shared_weights=shared_weights, **kwargs)
-        self._conv1_pool = BUTDConv2d(conv1_channels, conv1_channels, kernel_size=3, stride=2,
-                                      shared_weights=shared_weights, **kwargs)
+        self._conv1_pool = BUTDConv2d(conv1_channels, conv1_channels, kernel_size=2, stride=2,
+                                      groups=conv1_channels, shared_weights=shared_weights, **kwargs)
+
         self._conv2 = BUTDConv2d(conv1_channels, conv2_channels, kernel_size=5, shared_weights=shared_weights, **kwargs)
         self._conv2_pool = BUTDConv2d(conv2_channels, conv2_channels, kernel_size=3, stride=2,
-                                      shared_weights=shared_weights, **kwargs)
+                                      groups=conv2_channels, shared_weights=shared_weights, **kwargs)
 
         spat_shape = None
         if len(in_shape) == 3:
@@ -191,6 +192,45 @@ class BUTDTinyResNet(nn.Module):
     def counter_hebbian_update_value(self, **kwargs):
         self.conv1.counter_hebbian_update_value(**kwargs)
         self.layers.counter_hebbian_update_value(**kwargs)
+
+    @property
+    def out_shape(self):
+        return self._out_shape
+
+
+# A fully connected network with 1 hidden layer
+class BUTDFCNet(nn.Module):
+    def __init__(self, in_shape: List[int], shared_weights: bool = True, **kwargs):
+        super(BUTDFCNet, self).__init__()
+
+        self.in_shape = list(in_shape)
+        self.shared_weights = shared_weights
+
+        self._out_shape = kwargs.get('last_hidden_size', 500)
+
+        fc_in_shape = np.prod(self.in_shape)
+
+        self._flat = BUTDFlatten(in_shape=self.in_shape)
+
+        self._fc = BUTDLinear(fc_in_shape, self._out_shape, shared_weights=shared_weights, **kwargs)
+
+        self.layers = BUTDSequential(self._flat, self._fc)
+
+        # a random run to create bu neurons for each butd module
+        with torch.no_grad():
+            self.forward(torch.randn(1, *self.in_shape))
+
+    def forward(self, x, **kwargs):
+        x = self.layers(x, **kwargs)
+        return x
+
+    def back_forward(self, x, **kwargs):
+        x = self.layers.back_forward(x, **kwargs)
+        return x
+
+    def counter_hebbian_update_value(self, **kwargs):
+        for layer in self.layers:
+            layer.counter_hebbian_update_value(**kwargs)
 
     @property
     def out_shape(self):
