@@ -1,14 +1,26 @@
 
 # Top-Down Network Combines Back-Propagation with Attention
 
-This repository is the implementation of the paper: ["Top-Down Network Combines Back-Propagation with Attention"](https://arxiv.org/abs/2306.02415).
+This repository is the implementation of the paper: ["Biologically-Motivated Learning Model for Instructed Visual Processing"](https://arxiv.org/abs/2306.02415).
 
 The paper propose a biologically-inspired learning method for instruction-models. It uses a bottom-up (BU) - top-down (TD) model, in which a single TD network is used for both learning and guiding attention.
-The key contributions of the paper are:
-* Propose a novel top-down mechanism that combines learning from error signals with top-down attention.
-* Extending earlier work, offering a new step toward a more biologically plausible learning model. 
-* Suggest a Counter-Hebbian mechanism for biological learning. 
-* Present a novel biologically-inspired MTL algorithm that dynamically creates unique task-dependent sub-networks within conventional networks. 
+
+[//]: # (The key contributions of the paper are:)
+
+[//]: # (* Propose a biologically motivated learning model for instructed models. )
+
+[//]: # (* Propose a novel top-down mechanism that combines learning from error signals with guiding top-down attention.)
+
+[//]: # (* Extending earlier work, offering a new step toward a more biologically plausible learning model. )
+
+[//]: # (* suggest a Counter-Hebb learning procedure &#40;synaptic modification&#41; that can perform the exact backpropagation. )
+
+[//]: # (* Present a novel biologically-inspired MTL algorithm that dynamically creates unique task-dependent sub-networks within conventional networks. )
+
+The key features of this library are:
+* Converts conventional networks into an instruction based model (without adding additional parameters). 
+* Given an instruction/task, select a task-dependent sub-network within the full network to perform the task. 
+* The models can be learned either by the standard backpropagation or by 'Counter-Hebb' learning
 
 ## The Method
 
@@ -18,21 +30,20 @@ The proposed BU-TD approach consists of BU (blue $\uparrow$) and TD (orange $\do
 The input for each component is indicated by a letter: $I$ marks the input signal (e.g. images in the case of vision), $E$ marks error signals (e.g. loss gradients), and $A$ marks attention signals, e.g. selected object, location, or task. 
 
 
-This model enables: 
-
 ### Counter-Hebbian Learning
-A biologically motivated learning mechanism. Similar to the classical Hebbian learning, the Counter-Hebb learning rule update the synapse based on the activity of the neurons connected to the synapse. However, the Counter-Hebb update rule, presented on the right, relies on the counterpart downstream (marked in orange) counter neurons which is connected via lateral connections instead of a back firing from the upstream neuron as in the classical Hebb rule (on the left).
+A biologically motivated learning mechanism. Similar to the classical Hebbian learning, the Counter-Hebb learning rule update the synapse based on the activity of the neurons connected to the synapse (please see the paper for more information).
 
 ![CH learning](/figs/update_rule.png)
 
-### Multi-task Learning (MTL)
-The MTL algorithm offers dynamically learning task-dependent sub-networks for each task.
-The MTL algorithm comprises of two phases: a TD pass followed by a BU pass for prediction, and another TD pass for learning. The selected task provides input to the TD network, and the activation propagates downward attention-guiding signals with ReLU non-linearity. By applying ReLU, the task selectively activates a subset of neurons (i.e. non-zero values), composing a sub-network within the full network. The BU network then processes an input image using a composition of ReLU and GaLU. The GaLU function (denoted with dashed arrows) gates the BU hidden layers by their corresponding counter TD hidden layers. As a result, the BU computation is performed only on the selected sub-network. Lastly, the prediction head generates a prediction based on the top-level BU hidden layer. 
-For learning, the same TD network is then reused to propagate prediction error signals, starting from the prediction head. This computation is performed with GaLU exclusively (no ReLU), thereby permitting negative values. Finally, the 'Counter-Hebb' learning rule adjusts both networks' weights based on the activation values of their hidden layers. Therefore, in contrast with standard models, the entire computation is carried out by neurons in the network, and no external computation is used for learning (e.g. Back-Propagation).
-Alternatively, the learning phase can be replabed with standard BP under the constraints of sharing the BU and TD weights. This yields an equivalent learning phase.
+### Guided Learning (multi-task)
+The Multi-Task Learning (MTL) algorithm comprises of two phases: a TD pass followed by a BU pass for prediction, and another TD pass for 'Counter-Hebb' learning. The last TD pass can be replaced by backpropagation.  
+**Inference:**
+The selected task provides input to the TD network which select a task-dependent sub network within the full network. The BU network then processes the input signals (image) using only the selected sub-network to generate prediction.
+**Learning:**
+This model can be learned via the standard backpropagation.
+Alternatively, the same TD network can be reused to propagate prediction error signals that used in 'Counter-Hebb' learning.
 
 ![MTL](/figs/MTL_schematic.png)
-
 
 See the paper for more details.
 
@@ -45,23 +56,25 @@ To install requirements:
 pip install -r requirements.txt
 ```
 
-## Multi-Task Learning 
+## Experiments
 
-To reproduce the Multi-MNIST experiments in the paper, run this command:
-
-```train
-python main.py --config_file multi_mnist_config.json 
-```
-
-** Note that the Multi-MNIST dataset will be automatically downloaded to your directory
-
-To reproduce the Celeb-A experiments in the paper, run this command:
+To reproduce the experiments in the paper, run the following command with the proper config file:
 
 ```train
-python main.py --config_file celeb_a_config.json 
+python main.py --config_file <name of a config file> 
 ```
 
-** Note that the dataset must be downloaded in advance either from [here](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) or from Pytorch torchvision datasets
+The following config files correspond to the different experiments in the paper:
+* 'celeb_a_config.json'
+* 'multi_mnist_config.json'
+* 'cifar_config.json'
+* 'fashion_mnist_config.json'
+* 'mnist_config.json'
+
+You can modify the experiments by modifying the config files 
+
+Note that all data set but the Celeb-A dataset will be automatically downloaded to your directory. 
+For the Celeb-A experiments you must downloaded the dataset in advance either from [here](https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) or from Pytorch torchvision datasets
 
 ## BU-TD Modules
 
@@ -75,10 +88,10 @@ ResNet blocks are implemented in `butd_building_blocks.py`.
 
 ## Creating a BU-TD model
 
-*   Define your own BU-TD model using the custom layers.
-    *   Use BU-TD layers similar to the standard PyTorch layers usage. 
-    *   The BU-TD model class must include `back_forward` method (and optionally `counter_hebbian_update_value` method to support Counter-Hebbian learning)
-    *   ResNet and Convolutional networks examples can be found in `butd_core_networks.py`.
+Define your own BU-TD model using the custom layers.
+*   Use BU-TD layers similar to the standard PyTorch layers usage. 
+*   The BU-TD model class must include `back_forward` method (and optionally `counter_hebbian_update_value` method to support Counter-Hebbian learning)
+*   ResNet and other examples can be found in `butd_architectures.py`.
     
 ## Counter-Hebbian Learning
 

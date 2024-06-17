@@ -20,7 +20,7 @@ from butd_modules.network_models import ClassificationBUTDNet, TaskBUTDNet
 from utils import *
 from names_utils import name2loss, name2metric, name2optim, name2network_module
 from mylogger import setup_logger
-from butd_modules.butd_core_networks import BUTDSimpleNet
+from butd_modules.butd_architectures import BUTDSimpleNet
 
 
 # Output Configurations

@@ -5,8 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, f1_score
 
-from butd_modules.butd_core_networks import BUTDSimpleNet, BUTDTinyResNet, BUTDFCNet
-from butd_modules.butd_architectures import get_conv_net, butd_resnet18
+from butd_modules.butd_architectures import get_conv_net, butd_resnet18, BUTDSimpleNet, BUTDTinyResNet, BUTDFCNet
 from utils import galu
 
 
