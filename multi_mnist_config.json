@@ -34,7 +34,7 @@
         "norm_layer available options": ["no_norm", null],
         "task_embedding_size": 50,
         "last_hidden_size": 50,
-        "conv_channels": [64, 64]
+        "conv_channels": [32, 32]
     },
 
     "data set parameters": {

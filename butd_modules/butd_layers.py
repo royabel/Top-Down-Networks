@@ -16,8 +16,9 @@ from torch.nn.utils._expanded_weights.conv_utils import conv_backward, int_paddi
 
 SymWeights = False
 AddNoise = False
-NoiseStd = 0.1
-WeightInitFactor = False
+NoiseStd = 0.05
+ModifiedInit = False
+DefaultWeightInitFactor = 0.1
 
 
 def butd_module_wrapper(cls):
@@ -133,11 +134,11 @@ class BUTDLinear(nn.Linear):
 
         self.reset_back_parameters()
 
-        if WeightInitFactor:
+        if ModifiedInit:
             with torch.no_grad():
-                self.weight *= WeightInitFactor
+                self.weight *= kwargs.get('weight_init_factor', DefaultWeightInitFactor)
                 if not self.shared_weights:
-                    self.back_weight *= WeightInitFactor
+                    self.back_weight *= kwargs.get('weight_init_factor', DefaultWeightInitFactor)
 
     def reset_back_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
@@ -256,11 +257,11 @@ class BUTDConv2d(nn.Conv2d):
 
         self.reset_back_parameters()
 
-        if WeightInitFactor:
+        if ModifiedInit:
             with torch.no_grad():
-                self.weight *= WeightInitFactor
+                self.weight *= kwargs.get('weight_init_factor', DefaultWeightInitFactor)
                 if not self.shared_weights:
-                    self.back_weight *= WeightInitFactor
+                    self.back_weight *= kwargs.get('weight_init_factor', DefaultWeightInitFactor)
 
     def reset_back_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
@@ -304,43 +305,7 @@ class BUTDConv2d(nn.Conv2d):
 
         return out
 
-        # if self.padding_mode != 'zeros':
-        #     raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
-        #
-        # if self.bu_neurons is not None:
-        #     if self.shared_weights:
-        #         return torch.nn.grad.conv2d_input(self.bu_neurons.shape, self.weight, input, self.stride, self.padding,
-        #                                           self.dilation, self.groups)
-        #     else:
-        #         return torch.nn.grad.conv2d_input(self.bu_neurons.shape, self.weight, input, self.stride, self.padding,
-        #                                           self.dilation, self.groups)
-        # if self.shared_weights:
-        #     return F.conv_transpose2d(
-        #         input, self.weight, self.back_bias if bias_blocking is False else None, self.stride, self.padding,
-        #         kwargs.get('output_padding', self.output_padding_), self.groups, self.dilation)
-        # else:
-        #     return F.conv_transpose2d(
-        #         input, self.back_weight, self.back_bias if bias_blocking is False else None, self.stride, self.padding,
-        #         0, self.groups, self.dilation)
-
     def counter_hebbian_update_value(self, update_forward_bias=True, update_backward_bias=True):
-        # if self.groups < 2:
-        #     unfolded_bu_neurons = F.unfold(self.bu_neurons, self.weight.shape[-2:],
-        #                                    dilation=self.dilation, padding=self.padding, stride=self.stride)
-        #     update_val = torch.einsum(
-        #         'bkn,bcn->bck',
-        #         unfolded_bu_neurons,
-        #         torch.flatten(self.td_neurons, start_dim=2)
-        #     ).mean(axis=0).reshape(*self.weight.shape)
-        # else:
-        #     grouped_y_g = torch.flatten(self.td_neurons, start_dim=2)
-        #     grouped_y_g = grouped_y_g.reshape(grouped_y_g.shape[0], self.groups, -1, grouped_y_g.shape[-1])
-        #     grouped_x = self.bu_neurons.reshape(self.bu_neurons.shape[0] * self.groups, -1, * self.bu_neurons.shape[-2:])
-        #     unfolded_x = F.unfold(grouped_x, self.weight.shape[2:], dilation=self.dilation, padding=self.padding, stride=self.stride)
-        #     unfolded_x = unfolded_x.reshape(-1, self.groups, *unfolded_x.shape[1:])
-        #     w_grad = torch.einsum('bgkn,bgcn->bgck', unfolded_x, grouped_y_g).mean(axis=0)
-        #     update_val = w_grad.reshape(w_grad.shape[0] * w_grad.shape[1], -1).reshape(*self.weight.shape)
-
         update_val = torch.nn.grad.conv2d_weight(
             self.bu_neurons, self.weight.shape, self.td_neurons,
             stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups
