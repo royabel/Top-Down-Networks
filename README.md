@@ -65,11 +65,11 @@ python main.py --config_file <name of a config file>
 ```
 
 The following config files correspond to the different experiments in the paper:
-* 'celeb_a_config.json'
-* 'multi_mnist_config.json'
-* 'cifar_config.json'
-* 'fashion_mnist_config.json'
-* 'mnist_config.json'
+* `celeb_a_config.json`
+* `multi_mnist_config.json`
+* `cifar_config.json`
+* `fashion_mnist_config.json`
+* `mnist_config.json`
 
 You can modify the experiments by modifying the config files 
 
